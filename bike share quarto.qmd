@@ -1,0 +1,167 @@
+---
+title: "Bike share Quarto"
+format: html
+editor: visual
+---
+
+```{r}
+library(vroom)
+library(lubridate)
+library(tidyverse)
+library(GGally)
+library(patchwork)
+library(tidymodels)
+
+bikesharetrain <- vroom("C:/Users/julia/OneDrive - Brigham Young University/Desktop/stat 348/Bikeshare-STAT-348/bike-sharing-demand/train.csv")
+
+bikesharetest <- vroom("C:/Users/julia/OneDrive - Brigham Young University/Desktop/stat 348/Bikeshare-STAT-348/bike-sharing-demand/test.csv")
+
+```
+
+```{r}
+glimpse(bikesharetrain)
+```
+
+```{r}
+summary(bikesharetrain)
+```
+
+```{r}
+scatterplot<- ggplot(bikesharetrain, aes(x = datetime)) +
+  geom_point(aes(y = casual, color = "casual"), alpha = 0.05) +
+  geom_point(aes(y = registered, color = "registered"), alpha = 0.05) +
+  geom_smooth(aes(y = casual, color = "casual"), se = FALSE) +
+  geom_smooth(aes(y = registered, color = "registered"), se = FALSE) +
+  scale_color_manual(values = c("casual" = "#0000FF",
+                                "registered" = "#FF4040")) +
+  scale_x_datetime(date_breaks = "2 months", date_labels = "%b %Y") +
+  labs(
+    title = "Bike Rentals by User Type",
+    subtitle = "Washington D.C. bike sharing demand (2011–2012)",
+    x = "Date",
+    y = "Number of Rentals",
+    color = "User Type",
+    caption = "Source: Kaggle Bike Sharing Demand Dataset"
+  ) +
+  theme_minimal() +
+  theme(
+    axis.text.x = element_text(angle = 45, hjust = 1),
+    axis.ticks = element_line(color = "black", linewidth = 0.8),
+    axis.line = element_line(color = "black", linewidth = 0.8)
+  )
+
+
+
+
+
+
+```
+
+```{r}
+
+barchart <- bikesharetrain |>
+  pivot_longer(cols = c(casual, registered),
+               names_to = "user_type",
+               values_to = "rentals") |>
+  ggplot(aes(x = factor(weather,
+                        levels = 1:4,
+                        labels = c("Clear/Sunny", "Mist/Cloudy", "Light Snow/Rain", "Heavy Rain/Snow")),
+             y = rentals,
+             fill = user_type)) +
+  geom_col(position = "stack") +
+  labs(
+    title = "Rentals by Weather Type",
+    x = "Weather Type",
+    y = "Number of Rentals",
+    fill = "User Type",
+    caption = "Source: Kaggle Bike Sharing Demand Dataset"
+  ) +
+  theme_minimal() +
+  theme(
+    axis.text.x = element_text(angle = 0, hjust = 0.5, size = 6, face = "bold"),
+    axis.ticks = element_line(color = "black", linewidth = 0.8),
+    axis.line = element_line(color = "black", linewidth = 0.8),
+    axis.title = element_text(face = "bold")
+  )+ scale_fill_manual(values = c("casual" = "#66CD00", "registered" = "#CD661D"))
+
+
+
+
+```
+
+```{r}
+
+bikesharetrain <- bikesharetrain |>
+  mutate(
+    hour = hour(datetime),
+    weekday = wday(datetime, label = TRUE, abbr = TRUE)
+  )
+
+ heatmap<- ggplot(summarise(group_by(bikesharetrain, hour, weekday), avg_rentals = mean(count), .groups = "drop"), aes(x = factor(hour), y = weekday, fill = avg_rentals)) +
+  geom_tile() +
+  scale_fill_gradientn(colors = c("#5286ff", "#96c5ff","#96fcff", "lightgreen", "lightyellow", "#ffcb82","#ffa852","#ff7a52", "#ff1c1c"))+
+  labs(
+    title = "Heatmap: when bikes are rented",
+    x = "Hour",
+    y = "Weekday",
+    fill = "Avg Rentals"
+  ) +
+  theme_minimal()
+
+
+
+```
+
+```{r}
+windspeed <- ggplot(bikesharetrain, aes(x = windspeed)) +
+geom_jitter(aes(y = count), width = 1, height = 0, alpha = 0.08, color = "#9A32CD")+
+  scale_x_continuous(breaks = seq(0, max(bikesharetrain$windspeed), by = 5)) +
+  scale_y_continuous(breaks = seq(0, max(bikesharetrain$count), by =100)) +
+geom_smooth(aes(y = count), method = "loess", se = FALSE, color = "#68228B")+  labs(
+    title = "Bike Rentals vs Wind Speed",
+    x = "Wind Speed",  ## in kilometers / hour ???
+    y = "Number of Rentals",
+    color = "User Type",
+    caption = "Source: Kaggle Bike Sharing Demand Dataset"
+  ) +
+  theme_minimal()
+
+```
+
+```{r}
+
+twoxtwo <- (scatterplot | barchart) / (heatmap | windspeed) +
+  plot_annotation(title = "epic bike share analysis EDA", subtitle = "by julia nilsson")
+
+```
+
+```{r}
+# ggsave(
+#   filename = "bike_sharing_2x2.png",
+#   plot = twoxtwo,
+#   width = 12,   # inches
+#   height = 10,  # inches
+#   dpi = 300
+# )
+```
+
+```{r}
+ln_model <- linear_reg() |>
+  set_engine("lm") |>
+  set_mode("regression") |>
+  fit(formula = count~temp+humidity+season+atemp+workingday, data=bikesharetrain)
+
+bike_pred <- predict(ln_model, 
+                     new_data = bikesharetest)
+bike_pred
+```
+
+```{r}
+kag_submission <- bind_cols(bikesharetest, bike_pred) |>
+  select(datetime, .pred) |>
+  rename(count = .pred)|>
+  mutate(count = pmax(0,count)) |>
+  mutate(datetime = as.character(format(datetime)))
+
+vroom_write(x=kag_submission, file = "./bikepredictions.csv", delim=",")
+```
